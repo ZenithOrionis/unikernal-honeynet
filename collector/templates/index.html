@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Unikernel Honeynet Collector</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f3efe7;
+        --card: #fffdf8;
+        --ink: #1b2520;
+        --muted: #5a6960;
+        --line: #d7d1c7;
+        --accent: #0d7a5f;
+        --accent-soft: #d9f0e8;
+        --alert: #8b2e1f;
+        --alert-soft: #f7ddd9;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(13, 122, 95, 0.08), transparent 35%),
+          linear-gradient(180deg, #faf6ef 0%, var(--bg) 100%);
+        color: var(--ink);
+      }
+
+      main {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 32px 20px 48px;
+      }
+
+      .hero {
+        display: grid;
+        gap: 12px;
+        margin-bottom: 28px;
+      }
+
+      .hero h1 {
+        margin: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+      }
+
+      .hero p {
+        margin: 0;
+        color: var(--muted);
+        max-width: 760px;
+        line-height: 1.5;
+      }
+
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 14px;
+        margin-bottom: 28px;
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 18px;
+        box-shadow: 0 10px 24px rgba(27, 37, 32, 0.05);
+      }
+
+      .card h2 {
+        margin: 0 0 8px;
+        font-size: 0.95rem;
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .card strong {
+        font-size: 1.9rem;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 18px;
+      }
+
+      .panel {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 20px;
+        box-shadow: 0 10px 24px rgba(27, 37, 32, 0.05);
+      }
+
+      .panel h3 {
+        margin: 0 0 14px;
+        font-size: 1.05rem;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 10px 8px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+        font-size: 0.94rem;
+      }
+
+      th {
+        color: var(--muted);
+        font-weight: 700;
+      }
+
+      .pill {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 0.8rem;
+        margin: 2px 4px 2px 0;
+      }
+
+      .pill.alert {
+        background: var(--alert-soft);
+        color: var(--alert);
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      code {
+        font-family: Consolas, "Courier New", monospace;
+        font-size: 0.9em;
+      }
+
+      @media (max-width: 720px) {
+        main {
+          padding: 24px 14px 36px;
+        }
+
+        th,
+        td {
+          padding: 8px 6px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <h1>Unikernel Honeynet Collector</h1>
+        <p>
+          Centralized event view for the three decoy nodes and the Docker baseline.
+          This page is backed by SQLite at <code>{{ summary.db_path }}</code>.
+        </p>
+      </section>
+
+      <section class="cards">
+        <article class="card">
+          <h2>Total events</h2>
+          <strong>{{ summary.total_events }}</strong>
+        </article>
+        <article class="card">
+          <h2>Suspicious events</h2>
+          <strong>{{ summary.suspicious_events }}</strong>
+        </article>
+        <article class="card">
+          <h2>Unique source IPs</h2>
+          <strong>{{ summary.unique_ips }}</strong>
+        </article>
+        <article class="card">
+          <h2>Login attempts</h2>
+          <strong>{{ summary.login_attempts }}</strong>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <h3>By decoy</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Decoy</th>
+                <th>Profile</th>
+                <th>Hits</th>
+                <th>Suspicious</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in summary.by_decoy %}
+              <tr>
+                <td>{{ row.decoy_id }}</td>
+                <td>{{ row.profile }}</td>
+                <td>{{ row.hits }}</td>
+                <td>{{ row.suspicious_hits or 0 }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="4" class="muted">No events yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </article>
+
+        <article class="panel">
+          <h3>Top source IPs</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Source</th>
+                <th>Hits</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in summary.top_ips %}
+              <tr>
+                <td>{{ row.src_ip }}</td>
+                <td>{{ row.hits }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="2" class="muted">No source IPs yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </article>
+
+        <article class="panel">
+          <h3>Top attacked paths</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Path</th>
+                <th>Hits</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in summary.by_path %}
+              <tr>
+                <td>{{ row.path }}</td>
+                <td>{{ row.hits }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="2" class="muted">No path data yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </article>
+      </section>
+
+      <section class="grid" style="margin-top: 18px;">
+        <article class="panel">
+          <h3>Recent suspicious events</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Decoy</th>
+                <th>Source</th>
+                <th>Path</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in summary.recent_suspicious %}
+              <tr>
+                <td>{{ row.ts }}</td>
+                <td>{{ row.decoy_id }}</td>
+                <td>{{ row.src_ip }}</td>
+                <td>
+                  <div>{{ row.path }}</div>
+                  {% if row.username or row.password %}
+                  <div class="muted">creds: {{ row.username }} / {{ row.password }}</div>
+                  {% endif %}
+                  <div>
+                    {% for tag in row.tags %}
+                    <span class="pill alert">{{ tag }}</span>
+                    {% endfor %}
+                  </div>
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="4" class="muted">No suspicious events yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </article>
+
+        <article class="panel">
+          <h3>Recent activity</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Decoy</th>
+                <th>Request</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in summary.recent_events %}
+              <tr>
+                <td>{{ row.ts }}</td>
+                <td>{{ row.decoy_id }}</td>
+                <td>
+                  <div>{{ row.method }} {{ row.path }}</div>
+                  <div class="muted">{{ row.src_ip }}</div>
+                  <div>
+                    {% for tag in row.tags %}
+                    <span class="pill {{ 'alert' if row.suspicious else '' }}">{{ tag }}</span>
+                    {% endfor %}
+                  </div>
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="3" class="muted">No recent activity yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </article>
+      </section>
+    </main>
+  </body>
+  </html>
+

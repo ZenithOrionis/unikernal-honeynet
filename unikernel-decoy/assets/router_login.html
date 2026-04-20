@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{TITLE}}</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: linear-gradient(180deg, #ebf7f5, #d8ebe8);
+        color: #19312b;
+      }
+      main {
+        max-width: 480px;
+        margin: 56px auto;
+        background: #ffffff;
+        border-radius: 18px;
+        padding: 28px;
+        border: 1px solid #c7ddd8;
+        box-shadow: 0 12px 28px rgba(25, 49, 43, 0.08);
+      }
+      .meta {
+        color: #527068;
+        margin-bottom: 10px;
+      }
+      input {
+        width: 100%;
+        padding: 10px 12px;
+        margin-top: 6px;
+        border-radius: 10px;
+        border: 1px solid #c8d8d4;
+      }
+      button {
+        background: #0c705c;
+        color: #fff;
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="meta">{{SERVICE_LABEL}} :: {{HOSTNAME}}</div>
+      <h1>{{BANNER}}</h1>
+      {{NOTICE}}
+      <p>Sign in to continue to the router management interface.</p>
+      <form method="post" action="/login">
+        <label>Username <input name="username" type="text"></label><br><br>
+        <label>Password <input name="password" type="password"></label><br><br>
+        <button type="submit">Sign in</button>
+      </form>
+    </main>
+  </body>
+</html>
+

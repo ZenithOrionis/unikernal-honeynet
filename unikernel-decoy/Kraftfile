@@ -1,0 +1,7 @@
+spec: v0.6
+name: unikernel-decoy
+runtime: base:latest
+rootfs: ./Dockerfile
+cmd:
+  - /app/decoy-server
+

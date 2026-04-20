@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{TITLE}}</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: "Segoe UI", sans-serif;
+        background: linear-gradient(180deg, #0f1720, #243445);
+        color: #eaf1f4;
+      }
+      main {
+        max-width: 500px;
+        margin: 56px auto;
+        background: rgba(6, 10, 15, 0.88);
+        border-radius: 20px;
+        padding: 30px;
+        border: 1px solid rgba(111, 132, 153, 0.35);
+        box-shadow: 0 20px 44px rgba(0, 0, 0, 0.32);
+      }
+      .meta {
+        color: #8fa7b8;
+        margin-bottom: 10px;
+      }
+      input {
+        width: 100%;
+        padding: 11px 12px;
+        margin-top: 6px;
+        border-radius: 10px;
+        border: 1px solid #36506a;
+        background: #132231;
+        color: #eef6fb;
+      }
+      button {
+        background: #f18a32;
+        color: #111;
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 14px;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="meta">{{SERVICE_LABEL}} :: {{HOSTNAME}}</div>
+      <h1>{{BANNER}}</h1>
+      {{NOTICE}}
+      <p>Authenticate to review camera channels, storage quotas, and export tasks.</p>
+      <form method="post" action="/login">
+        <label>Operator ID <input name="username" type="text"></label><br><br>
+        <label>Passcode <input name="password" type="password"></label><br><br>
+        <button type="submit">Open recorder</button>
+      </form>
+    </main>
+  </body>
+</html>
+

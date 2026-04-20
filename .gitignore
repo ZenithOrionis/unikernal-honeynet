@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.pydeps/
+.tmp/
+.prereqs_wheels/
+.pytest_cache/
+collector/events.db
+collector/*.db
+dashboard/output/*
+!dashboard/output/.gitkeep
+logs/
+*.log
+.DS_Store

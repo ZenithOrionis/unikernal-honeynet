@@ -1,0 +1,18 @@
+services:
+  baseline:
+    build:
+      context: .
+    container_name: honeynet-baseline
+    environment:
+      BASELINE_ID: docker-baseline-01
+      BASELINE_PROFILE: router
+      BASELINE_TITLE: Docker EdgeRouter X
+      BASELINE_HOSTNAME: docker-gw-01
+      BASELINE_LABEL: Container comparison node
+      COLLECTOR_URL: ${COLLECTOR_URL:-http://host.docker.internal:5000/event}
+      HTTP_PORT: 80
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8090:80"
+

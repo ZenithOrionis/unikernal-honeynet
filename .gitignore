@@ -13,4 +13,5 @@ dashboard/output/*
 !dashboard/output/.gitkeep
 logs/
 *.log
+.unikraft/
 .DS_Store

@@ -5,11 +5,14 @@ import json
 import sqlite3
 from pathlib import Path
 from typing import Any
+from urllib import error, request
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_DB = ROOT_DIR / "collector" / "events.db"
 DEFAULT_OUTPUT = ROOT_DIR / "dashboard" / "output" / "report.html"
+DEFAULT_API_BASE = "http://127.0.0.1:5000"
+DEFAULT_TOKEN = "dev-analyst-token"
 
 
 def get_connection(db_path: Path) -> sqlite3.Connection:
@@ -23,333 +26,142 @@ def fetch_scalar(conn: sqlite3.Connection, query: str, params: tuple[Any, ...] =
     return row[0] if row else 0
 
 
-def fetch_rows(conn: sqlite3.Connection, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
-    return [dict(row) for row in conn.execute(query, params).fetchall()]
-
-
-def load_summary(db_path: Path) -> dict[str, Any]:
+def load_summary_from_sqlite(db_path: Path) -> dict[str, Any]:
     if not db_path.exists():
         raise FileNotFoundError(f"database not found: {db_path}")
 
     with get_connection(db_path) as conn:
         total_events = int(fetch_scalar(conn, "SELECT COUNT(*) FROM events"))
         suspicious_events = int(fetch_scalar(conn, "SELECT COUNT(*) FROM events WHERE suspicious = 1"))
-        unique_ips = int(
-            fetch_scalar(conn, "SELECT COUNT(DISTINCT src_ip) FROM events WHERE TRIM(src_ip) <> ''")
-        )
-        login_attempts = int(fetch_scalar(conn, "SELECT COUNT(*) FROM events WHERE path = '/login'"))
-        by_decoy = fetch_rows(
-            conn,
-            """
-            SELECT decoy_id, profile, COUNT(*) AS hits, SUM(suspicious) AS suspicious_hits
-            FROM events
-            GROUP BY decoy_id, profile
-            ORDER BY hits DESC, decoy_id ASC
-            """,
-        )
-        top_ips = fetch_rows(
-            conn,
-            """
-            SELECT src_ip, COUNT(*) AS hits
-            FROM events
-            GROUP BY src_ip
-            ORDER BY hits DESC, src_ip ASC
-            LIMIT 10
-            """,
-        )
-        top_paths = fetch_rows(
-            conn,
-            """
-            SELECT path, COUNT(*) AS hits
-            FROM events
-            GROUP BY path
-            ORDER BY hits DESC, path ASC
-            LIMIT 10
-            """,
-        )
-        suspicious_rows = fetch_rows(
-            conn,
-            """
-            SELECT ts, decoy_id, src_ip, path, username, password, tags
-            FROM events
-            WHERE suspicious = 1
-            ORDER BY id DESC
-            LIMIT 20
-            """,
-        )
-        login_rows = fetch_rows(
-            conn,
-            """
-            SELECT ts, decoy_id, src_ip, username, password, user_agent
-            FROM events
-            WHERE path = '/login' AND method = 'POST'
-            ORDER BY id DESC
-            LIMIT 20
-            """,
-        )
-
-    for row in suspicious_rows:
-        try:
-            row["tags"] = json.loads(row.get("tags") or "[]")
-        except json.JSONDecodeError:
-            row["tags"] = []
+        unique_ips = int(fetch_scalar(conn, "SELECT COUNT(DISTINCT src_ip) FROM events WHERE TRIM(src_ip) <> ''"))
+        credential_attempts = int(fetch_scalar(conn, "SELECT COUNT(*) FROM events WHERE path = '/login'"))
 
     return {
-        "db_path": str(db_path),
+        "source": str(db_path),
         "total_events": total_events,
         "suspicious_events": suspicious_events,
         "unique_ips": unique_ips,
-        "login_attempts": login_attempts,
-        "by_decoy": by_decoy,
-        "top_ips": top_ips,
-        "top_paths": top_paths,
-        "suspicious_rows": suspicious_rows,
-        "login_rows": login_rows,
+        "credential_attempts": credential_attempts,
     }
 
 
-def render_table(headers: list[str], rows: list[list[str]]) -> str:
-    if not rows:
-        rows = [["No data yet."] + [""] * (len(headers) - 1)]
-    thead = "".join(f"<th>{header}</th>" for header in headers)
-    body_rows = []
-    for row in rows:
-        body_rows.append("<tr>" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>")
-    tbody = "".join(body_rows)
-    return f"<table><thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody></table>"
+def fetch_api_json(api_base_url: str, token: str, path: str, method: str = "GET", payload: dict[str, Any] | None = None) -> Any:
+    encoded = None if payload is None else json.dumps(payload).encode("utf-8")
+    req = request.Request(
+        f"{api_base_url.rstrip('/')}{path}",
+        data=encoded,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        method=method,
+    )
+    with request.urlopen(req, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 
-def render_html(summary: dict[str, Any]) -> str:
-    by_decoy = render_table(
-        ["Decoy", "Profile", "Hits", "Suspicious"],
-        [
-            [
-                row["decoy_id"],
-                row["profile"],
-                str(row["hits"]),
-                str(row.get("suspicious_hits") or 0),
-            ]
-            for row in summary["by_decoy"]
-        ],
+def download_api_export(api_base_url: str, token: str, path: str) -> bytes:
+    req = request.Request(
+        f"{api_base_url.rstrip('/')}{path}",
+        headers={"Authorization": f"Bearer {token}"},
+        method="GET",
     )
-    top_ips = render_table(
-        ["Source IP", "Hits"],
-        [[row["src_ip"], str(row["hits"])] for row in summary["top_ips"]],
-    )
-    top_paths = render_table(
-        ["Path", "Hits"],
-        [[row["path"], str(row["hits"])] for row in summary["top_paths"]],
-    )
-    suspicious = render_table(
-        ["Timestamp", "Decoy", "Source", "Path", "Credentials", "Tags"],
-        [
-            [
-                row["ts"],
-                row["decoy_id"],
-                row["src_ip"],
-                row["path"],
-                f"{row['username']} / {row['password']}".strip(" /"),
-                ", ".join(row["tags"]),
-            ]
-            for row in summary["suspicious_rows"]
-        ],
-    )
-    login_rows = render_table(
-        ["Timestamp", "Decoy", "Source", "Username", "Password", "User-Agent"],
-        [
-            [
-                row["ts"],
-                row["decoy_id"],
-                row["src_ip"],
-                row["username"],
-                row["password"],
-                row["user_agent"],
-            ]
-            for row in summary["login_rows"]
-        ],
-    )
+    with request.urlopen(req, timeout=20) as response:
+        return response.read()
 
-    return f"""<!doctype html>
+
+def choose_default_output(output: Path, fmt: str) -> Path:
+    if output.suffix.lower() == f".{fmt}":
+        return output
+    return output.with_suffix(f".{fmt}")
+
+
+def write_legacy_html(output: Path, summary: dict[str, Any]) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        f"""<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Unikernel Honeynet Report</title>
+    <title>Legacy Honeynet Report</title>
     <style>
-      :root {{
-        --bg: #f7f4eb;
-        --card: #fffdf9;
-        --ink: #1d241f;
-        --muted: #59665f;
-        --line: #d8d1c7;
-        --accent: #184c8f;
-        --alert: #8c2c16;
-      }}
-
-      * {{
-        box-sizing: border-box;
-      }}
-
-      body {{
-        margin: 0;
-        font-family: Georgia, "Times New Roman", serif;
-        background: linear-gradient(180deg, #faf8f1 0%, var(--bg) 100%);
-        color: var(--ink);
-      }}
-
-      main {{
-        max-width: 1180px;
-        margin: 0 auto;
-        padding: 36px 20px 48px;
-      }}
-
-      header {{
-        margin-bottom: 24px;
-      }}
-
-      h1, h2 {{
-        margin: 0 0 10px;
-      }}
-
-      p {{
-        color: var(--muted);
-        line-height: 1.55;
-      }}
-
-      .cards {{
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: 14px;
-        margin: 24px 0;
-      }}
-
-      .card, section {{
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: 16px;
-        padding: 18px;
-        box-shadow: 0 8px 20px rgba(29, 36, 31, 0.05);
-      }}
-
-      .card strong {{
-        display: block;
-        font-size: 2rem;
-        margin-top: 6px;
-      }}
-
-      .grid {{
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-        gap: 16px;
-        margin-top: 16px;
-      }}
-
-      table {{
-        width: 100%;
-        border-collapse: collapse;
-      }}
-
-      th, td {{
-        border-bottom: 1px solid var(--line);
-        padding: 10px 8px;
-        text-align: left;
-        vertical-align: top;
-        font-size: 0.95rem;
-      }}
-
-      th {{
-        color: var(--accent);
-        font-weight: 700;
-      }}
-
-      .meta {{
-        font-size: 0.92rem;
-      }}
-
-      .accent {{
-        color: var(--accent);
-      }}
-
-      .alert {{
-        color: var(--alert);
-      }}
+      body {{ margin: 0; font-family: 'Segoe UI', sans-serif; background: #f6f2e7; color: #1b2220; }}
+      main {{ max-width: 860px; margin: 0 auto; padding: 32px 18px 48px; }}
+      .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }}
+      .card {{ background: #fffdf8; border: 1px solid #ddd5c6; border-radius: 18px; padding: 18px; }}
+      .card strong {{ display: block; font-size: 2rem; margin-top: 6px; }}
     </style>
   </head>
   <body>
     <main>
-      <header>
-        <h1>Unikernel Honeynet Report</h1>
-        <p class="meta">
-          Generated from <span class="accent">{summary["db_path"]}</span>
-        </p>
-        <p>
-          This report summarizes attack-like activity across the three unikernel decoys and any
-          compatible baseline clients sending the same event schema to the collector.
-        </p>
-      </header>
-
+      <h1>Legacy Honeynet Report</h1>
+      <p>Fallback report generated from {summary["source"]}</p>
       <div class="cards">
         <div class="card"><div>Total events</div><strong>{summary["total_events"]}</strong></div>
-        <div class="card"><div>Suspicious events</div><strong class="alert">{summary["suspicious_events"]}</strong></div>
-        <div class="card"><div>Unique source IPs</div><strong>{summary["unique_ips"]}</strong></div>
-        <div class="card"><div>Login attempts</div><strong>{summary["login_attempts"]}</strong></div>
-      </div>
-
-      <div class="grid">
-        <section>
-          <h2>Requests by decoy</h2>
-          {by_decoy}
-        </section>
-        <section>
-          <h2>Top source IPs</h2>
-          {top_ips}
-        </section>
-        <section>
-          <h2>Top attacked paths</h2>
-          {top_paths}
-        </section>
-      </div>
-
-      <div class="grid">
-        <section>
-          <h2>Recent suspicious events</h2>
-          {suspicious}
-        </section>
-        <section>
-          <h2>Recent login attempts</h2>
-          {login_rows}
-        </section>
+        <div class="card"><div>Suspicious events</div><strong>{summary["suspicious_events"]}</strong></div>
+        <div class="card"><div>Unique IPs</div><strong>{summary["unique_ips"]}</strong></div>
+        <div class="card"><div>Credential attempts</div><strong>{summary["credential_attempts"]}</strong></div>
       </div>
     </main>
   </body>
-</html>"""
+</html>""",
+        encoding="utf-8",
+    )
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate an HTML report from honeynet events.")
-    parser.add_argument("--db", type=Path, default=DEFAULT_DB, help="Path to the collector SQLite DB")
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=DEFAULT_OUTPUT,
-        help="Path to write the HTML report",
-    )
+    parser = argparse.ArgumentParser(description="Generate an analyst report from the honeynet control plane.")
+    parser.add_argument("--api-base-url", default=DEFAULT_API_BASE, help="Base URL of the ingest API")
+    parser.add_argument("--token", default=DEFAULT_TOKEN, help="Analyst bearer token for authenticated exports")
+    parser.add_argument("--format", default="html", choices=("html", "csv"), help="Export format")
+    parser.add_argument("--mode", choices=("api", "sqlite", "auto"), default="auto", help="Preferred report source")
+    parser.add_argument("--db", type=Path, default=DEFAULT_DB, help="SQLite fallback database for legacy demo mode")
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="Destination report path")
     args = parser.parse_args()
 
-    summary = load_summary(args.db)
-    html = render_html(summary)
+    output = choose_default_output(args.output, args.format)
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(html, encoding="utf-8")
+    if args.mode in {"api", "auto"}:
+        try:
+            posture = fetch_api_json(args.api_base_url, args.token, "/api/v1/stats/posture")
+            artifact = fetch_api_json(
+                args.api_base_url,
+                args.token,
+                "/api/v1/reports/export",
+                method="POST",
+                payload={"format": args.format, "limit": 500},
+            )
+            payload = download_api_export(args.api_base_url, args.token, artifact["download_url"])
+            output.parent.mkdir(parents=True, exist_ok=True)
+            if args.format == "csv":
+                output.write_bytes(payload)
+            else:
+                output.write_text(payload.decode("utf-8"), encoding="utf-8")
+            print(f"Report written to {output}")
+            print(f"Source: {args.api_base_url}")
+            print(f"Detections new: {posture['detections_new']}")
+            print(f"Fleet unhealthy: {posture['fleet_unhealthy']}")
+            print(f"Coverage gaps: {', '.join(posture['coverage_gaps']) or 'none'}")
+            print(f"Recommended blocks: {len(posture['recommended_blocks'])}")
+            return 0
+        except (error.URLError, error.HTTPError, TimeoutError, KeyError, json.JSONDecodeError) as exc:
+            if args.mode == "api":
+                raise SystemExit(f"API export failed: {exc}") from exc
 
-    print(f"Report written to {args.output}")
+    if args.format != "html":
+        raise SystemExit("SQLite fallback only supports HTML output. Use --mode api for CSV exports.")
+
+    summary = load_summary_from_sqlite(args.db)
+    write_legacy_html(output, summary)
+    print(f"Report written to {output}")
+    print(f"Source: {summary['source']}")
     print(f"Total events: {summary['total_events']}")
     print(f"Suspicious events: {summary['suspicious_events']}")
     print(f"Unique IPs: {summary['unique_ips']}")
-    print(f"Login attempts: {summary['login_attempts']}")
+    print(f"Credential attempts: {summary['credential_attempts']}")
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

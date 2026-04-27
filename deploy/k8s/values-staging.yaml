@@ -1,0 +1,6 @@
+env:
+  environment: staging
+  webOrigin: https://honeynet-staging.internal.example.com
+ingress:
+  host: honeynet-staging.internal.example.com
+

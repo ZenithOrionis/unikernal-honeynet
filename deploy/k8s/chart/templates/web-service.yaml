@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "honeynet.fullname" . }}-web
+  labels:
+    {{- include "honeynet.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/component: web
+    app.kubernetes.io/name: {{ include "honeynet.name" . }}
+  ports:
+    - name: http
+      port: {{ .Values.web.service.port }}
+      targetPort: 80
+

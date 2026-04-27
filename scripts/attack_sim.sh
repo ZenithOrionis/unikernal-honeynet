@@ -6,6 +6,23 @@ if [[ "${INCLUDE_BASELINE:-0}" == "1" ]]; then
   TARGETS+=("http://localhost:8090")
 fi
 
+wait_for_target() {
+  local url="$1"
+  local max_attempts="${2:-20}"
+  local attempt=1
+
+  while (( attempt <= max_attempts )); do
+    if curl --silent --output /dev/null --max-time 3 "${url}/"; then
+      return 0
+    fi
+    sleep 1
+    ((attempt++))
+  done
+
+  echo "warning: ${url} did not become ready after ${max_attempts}s" >&2
+  return 1
+}
+
 get_request() {
   local url="$1"
   local path="$2"
@@ -26,6 +43,11 @@ post_login() {
     -d "username=${username}&password=${password}" \
     "${url}/login" || true
 }
+
+echo "==> Waiting for decoys to become reachable"
+for target in "${TARGETS[@]}"; do
+  wait_for_target "${target}" 25 || true
+done
 
 echo "==> Scenario 1: benign browsing"
 for target in "${TARGETS[@]}"; do
@@ -56,4 +78,3 @@ for target in "${TARGETS[@]}"; do
 done
 
 echo "==> Attack simulation complete"
-

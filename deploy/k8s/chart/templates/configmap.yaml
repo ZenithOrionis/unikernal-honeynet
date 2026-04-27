@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "honeynet.fullname" . }}-config
+  labels:
+    {{- include "honeynet.labels" . | nindent 4 }}
+data:
+  HONEYPOT_ENVIRONMENT: {{ .Values.env.environment | quote }}
+  HONEYPOT_WEB_ORIGIN: {{ .Values.env.webOrigin | quote }}
+  HONEYPOT_RETENTION_DAYS: {{ .Values.env.retentionDays | quote }}
+  HONEYPOT_OIDC_ISSUER_URL: {{ .Values.api.oidcIssuerUrl | quote }}
+  HONEYPOT_OIDC_AUDIENCE: {{ .Values.api.oidcAudience | quote }}
+  HONEYPOT_EXPECTED_FLEET_JSON: {{ .Values.env.expectedFleetJson | quote }}
+  {{- if .Values.minio.enabled }}
+  HONEYPOT_ARTIFACT_ENDPOINT_URL: {{ printf "http://%s-minio:9000" (include "honeynet.fullname" .) | quote }}
+  HONEYPOT_ARTIFACT_BUCKET: {{ .Values.minio.bucket | quote }}
+  {{- end }}

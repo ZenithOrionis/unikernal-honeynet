@@ -7,6 +7,21 @@ __pycache__/
 .tmp/
 .prereqs_wheels/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+node_modules/
+dist/
+build/
+coverage/
+*.egg-info/
+*.env
+*.local
+*.tsbuildinfo
+analyst-web/vite.config.js
+analyst-web/vite.config.d.ts
+analyst-web/src-tauri/target/
 collector/events.db
 collector/*.db
 dashboard/output/*
@@ -14,4 +29,5 @@ dashboard/output/*
 logs/
 *.log
 .unikraft/
+tools/
 .DS_Store

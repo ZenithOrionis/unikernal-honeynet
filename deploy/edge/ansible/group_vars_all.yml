@@ -1,0 +1,38 @@
+control_plane_base_url: "https://honeynet.internal.example.com/api/v1"
+ingest_api_key: "replace-me"
+decoy_release_version: "0.1.0"
+decoy_startup_timeout_seconds: 90
+decoy_check_interval_seconds: 10
+decoy_failure_threshold: 3
+kraft_lock_file: /run/honeynet-kraft.lock
+kraft_lock_timeout_seconds: 180
+public_base_url: "https://decoys.example.com"
+edge_node_id: "edge-site-01"
+profiles:
+  - name: router
+    decoy_id: gw-core-01
+    port: 8081
+    startup_delay_seconds: 0
+    title: EdgeRouter X
+    label: WAN routing node
+    site: london-branch
+    environment: dmz
+    coverage_role: internet_edge
+  - name: nvr
+    decoy_id: cam-admin-02
+    port: 8082
+    startup_delay_seconds: 35
+    title: SecureVision NVR
+    label: CCTV storage controller
+    site: london-branch
+    environment: dmz
+    coverage_role: branch
+  - name: admin
+    decoy_id: ops-panel-03
+    port: 8083
+    startup_delay_seconds: 70
+    title: Internal Control Panel
+    label: Enterprise operations portal
+    site: london-core
+    environment: internal
+    coverage_role: internal

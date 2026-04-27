@@ -10,8 +10,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 
@@ -48,6 +51,19 @@ static const DecoyProfile *default_profile_for_name(const char *profile_name) {
     }
 
     return get_router_profile();
+}
+
+
+static int elapsed_milliseconds(const struct timeval *start, const struct timeval *end) {
+    long seconds = end->tv_sec - start->tv_sec;
+    long microseconds = end->tv_usec - start->tv_usec;
+    long total = (seconds * 1000L) + (microseconds / 1000L);
+
+    if (total < 0) {
+        return 0;
+    }
+
+    return (int) total;
 }
 
 
@@ -93,10 +109,61 @@ static void load_runtime_config(DecoyConfig *config) {
         safe_copy(config->collector_url, sizeof(config->collector_url), value);
     }
 
+    safe_copy(config->collector_token, sizeof(config->collector_token), DEFAULT_COLLECTOR_TOKEN);
+    value = getenv("COLLECTOR_TOKEN");
+    if (value != NULL && value[0] != '\0') {
+        safe_copy(config->collector_token, sizeof(config->collector_token), value);
+    }
+
     safe_copy(config->asset_dir, sizeof(config->asset_dir), DEFAULT_ASSET_DIR);
     value = getenv("ASSET_DIR");
     if (value != NULL && value[0] != '\0') {
         safe_copy(config->asset_dir, sizeof(config->asset_dir), value);
+    }
+
+    safe_copy(config->edge_node_id, sizeof(config->edge_node_id), DEFAULT_EDGE_NODE_ID);
+    value = getenv("EDGE_NODE_ID");
+    if (value != NULL && value[0] != '\0') {
+        safe_copy(config->edge_node_id, sizeof(config->edge_node_id), value);
+    }
+
+    safe_copy(config->decoy_version, sizeof(config->decoy_version), DEFAULT_DECOY_VERSION);
+    value = getenv("DECOY_VERSION");
+    if (value != NULL && value[0] != '\0') {
+        safe_copy(config->decoy_version, sizeof(config->decoy_version), value);
+    }
+
+    safe_copy(config->public_endpoint, sizeof(config->public_endpoint), DEFAULT_PUBLIC_ENDPOINT);
+    value = getenv("PUBLIC_ENDPOINT");
+    if (value != NULL && value[0] != '\0') {
+        safe_copy(config->public_endpoint, sizeof(config->public_endpoint), value);
+    }
+
+    safe_copy(config->site, sizeof(config->site), DEFAULT_SITE);
+    value = getenv("SITE");
+    if (value != NULL && value[0] != '\0') {
+        safe_copy(config->site, sizeof(config->site), value);
+    }
+
+    safe_copy(config->environment, sizeof(config->environment), DEFAULT_ENVIRONMENT);
+    value = getenv("ENVIRONMENT");
+    if (value != NULL && value[0] != '\0') {
+        safe_copy(config->environment, sizeof(config->environment), value);
+    }
+
+    safe_copy(config->coverage_role, sizeof(config->coverage_role), DEFAULT_COVERAGE_ROLE);
+    value = getenv("COVERAGE_ROLE");
+    if (value != NULL && value[0] != '\0') {
+        safe_copy(config->coverage_role, sizeof(config->coverage_role), value);
+    }
+
+    config->heartbeat_interval_seconds = DEFAULT_HEARTBEAT_INTERVAL_SECONDS;
+    value = getenv("HEARTBEAT_INTERVAL_SECONDS");
+    if (value != NULL && value[0] != '\0') {
+        config->heartbeat_interval_seconds = atoi(value);
+    }
+    if (config->heartbeat_interval_seconds <= 0) {
+        config->heartbeat_interval_seconds = DEFAULT_HEARTBEAT_INTERVAL_SECONDS;
     }
 
     config->listen_port = DEFAULT_LISTEN_PORT;
@@ -104,6 +171,116 @@ static void load_runtime_config(DecoyConfig *config) {
     if (value != NULL && value[0] != '\0') {
         config->listen_port = atoi(value);
     }
+    if (config->listen_port <= 0) {
+        config->listen_port = DEFAULT_LISTEN_PORT;
+    }
+}
+
+
+static int option_matches(const char *argument, const char *option_name) {
+    return argument != NULL && strcmp(argument, option_name) == 0;
+}
+
+
+static const char *next_option_value(int argc, char **argv, int *index, const char *option_name) {
+    if (*index + 1 >= argc) {
+        fprintf(stderr, "missing value for %s\n", option_name);
+        return NULL;
+    }
+
+    *index += 1;
+    return argv[*index];
+}
+
+
+static void parse_runtime_args(DecoyConfig *config, int argc, char **argv) {
+    int index;
+
+    for (index = 1; index < argc; index++) {
+        const char *value = NULL;
+
+        if (option_matches(argv[index], "--profile")) {
+            value = next_option_value(argc, argv, &index, argv[index]);
+            if (value != NULL) {
+                safe_copy(config->profile, sizeof(config->profile), value);
+            }
+        } else if (option_matches(argv[index], "--decoy-id")) {
+            value = next_option_value(argc, argv, &index, argv[index]);
+            if (value != NULL) {
+                safe_copy(config->decoy_id, sizeof(config->decoy_id), value);
+            }
+        } else if (option_matches(argv[index], "--title")) {
+            value = next_option_value(argc, argv, &index, argv[index]);
+            if (value != NULL) {
+                safe_copy(config->title, sizeof(config->title), value);
+            }
+        } else if (option_matches(argv[index], "--hostname")) {
+            value = next_option_value(argc, argv, &index, argv[index]);
+            if (value != NULL) {
+                safe_copy(config->hostname, sizeof(config->hostname), value);
+            }
+        } else if (option_matches(argv[index], "--label")) {
+            value = next_option_value(argc, argv, &index, argv[index]);
+            if (value != NULL) {
+                safe_copy(config->label, sizeof(config->label), value);
+            }
+        } else if (option_matches(argv[index], "--collector-url")) {
+            value = next_option_value(argc, argv, &index, argv[index]);
+            if (value != NULL) {
+                safe_copy(config->collector_url, sizeof(config->collector_url), value);
+            }
+        } else if (option_matches(argv[index], "--collector-token")) {
+            value = next_option_value(argc, argv, &index, argv[index]);
+            if (value != NULL) {
+                safe_copy(config->collector_token, sizeof(config->collector_token), value);
+            }
+        } else if (option_matches(argv[index], "--edge-node-id")) {
+            value = next_option_value(argc, argv, &index, argv[index]);
+            if (value != NULL) {
+                safe_copy(config->edge_node_id, sizeof(config->edge_node_id), value);
+            }
+        } else if (option_matches(argv[index], "--decoy-version")) {
+            value = next_option_value(argc, argv, &index, argv[index]);
+            if (value != NULL) {
+                safe_copy(config->decoy_version, sizeof(config->decoy_version), value);
+            }
+        } else if (option_matches(argv[index], "--public-endpoint")) {
+            value = next_option_value(argc, argv, &index, argv[index]);
+            if (value != NULL) {
+                safe_copy(config->public_endpoint, sizeof(config->public_endpoint), value);
+            }
+        } else if (option_matches(argv[index], "--site")) {
+            value = next_option_value(argc, argv, &index, argv[index]);
+            if (value != NULL) {
+                safe_copy(config->site, sizeof(config->site), value);
+            }
+        } else if (option_matches(argv[index], "--environment")) {
+            value = next_option_value(argc, argv, &index, argv[index]);
+            if (value != NULL) {
+                safe_copy(config->environment, sizeof(config->environment), value);
+            }
+        } else if (option_matches(argv[index], "--coverage-role")) {
+            value = next_option_value(argc, argv, &index, argv[index]);
+            if (value != NULL) {
+                safe_copy(config->coverage_role, sizeof(config->coverage_role), value);
+            }
+        } else if (option_matches(argv[index], "--heartbeat-interval-seconds")) {
+            value = next_option_value(argc, argv, &index, argv[index]);
+            if (value != NULL && value[0] != '\0') {
+                config->heartbeat_interval_seconds = atoi(value);
+            }
+        } else if (option_matches(argv[index], "--listen-port")) {
+            value = next_option_value(argc, argv, &index, argv[index]);
+            if (value != NULL && value[0] != '\0') {
+                config->listen_port = atoi(value);
+            }
+        }
+    }
+
+    if (config->heartbeat_interval_seconds <= 0) {
+        config->heartbeat_interval_seconds = DEFAULT_HEARTBEAT_INTERVAL_SECONDS;
+    }
+
     if (config->listen_port <= 0) {
         config->listen_port = DEFAULT_LISTEN_PORT;
     }
@@ -202,8 +379,12 @@ static void handle_client(int client_fd, const struct sockaddr_in *client_addres
     char response[16384];
     char source_ip[INET_ADDRSTRLEN];
     HttpRequest request;
+    struct timeval started_at;
+    struct timeval finished_at;
     ssize_t request_length;
     size_t response_length;
+    int status_code = 0;
+    int latency_ms = 0;
 
     request_length = read_http_request(client_fd, raw_request, sizeof(raw_request));
     if (request_length <= 0) {
@@ -225,26 +406,56 @@ static void handle_client(int client_fd, const struct sockaddr_in *client_addres
         safe_copy(source_ip, sizeof(source_ip), "unknown");
     }
 
-    response_length = build_http_response(config, &request, response, sizeof(response));
+    gettimeofday(&started_at, NULL);
+    response_length = build_http_response(config, &request, response, sizeof(response), &status_code);
     send_all(client_fd, response, response_length);
-    send_event_to_collector(config, &request, source_ip);
+    gettimeofday(&finished_at, NULL);
+    latency_ms = elapsed_milliseconds(&started_at, &finished_at);
+    send_event_to_collector(config, &request, source_ip, status_code, latency_ms);
 
-    printf("[%s] %s %s from %s\n", config->hostname, request.method, request.path, source_ip);
+    printf(
+        "{"
+        "\"event\":\"request_complete\","
+        "\"decoy_id\":\"%s\","
+        "\"profile\":\"%s\","
+        "\"hostname\":\"%s\","
+        "\"src_ip\":\"%s\","
+        "\"method\":\"%s\","
+        "\"path\":\"%s\","
+        "\"status_code\":%d,"
+        "\"latency_ms\":%d,"
+        "\"suspicious\":%s"
+        "}\n",
+        config->decoy_id,
+        config->profile,
+        config->hostname,
+        source_ip,
+        request.method,
+        request.path,
+        status_code,
+        latency_ms,
+        request.suspicious ? "true" : "false"
+    );
     fflush(stdout);
 }
 
 
-int main(void) {
+int main(int argc, char **argv) {
     DecoyConfig config;
     int server_fd;
     int reuse_address = 1;
     struct sockaddr_in server_address;
+    time_t started_at;
+    time_t last_heartbeat_at;
 
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
     signal(SIGPIPE, SIG_IGN);
 
     load_runtime_config(&config);
+    parse_runtime_args(&config, argc, argv);
+    started_at = time(NULL);
+    last_heartbeat_at = 0;
 
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
@@ -276,34 +487,82 @@ int main(void) {
     }
 
     printf(
-        "decoy started: profile=%s id=%s title=%s port=%d collector=%s\n",
+        "{"
+        "\"event\":\"decoy_started\","
+        "\"profile\":\"%s\","
+        "\"decoy_id\":\"%s\","
+        "\"title\":\"%s\","
+        "\"listen_port\":%d,"
+        "\"collector_url\":\"%s\","
+        "\"edge_node_id\":\"%s\","
+        "\"site\":\"%s\","
+        "\"environment\":\"%s\","
+        "\"coverage_role\":\"%s\","
+        "\"decoy_version\":\"%s\""
+        "}\n",
         config.profile,
         config.decoy_id,
         config.title,
         config.listen_port,
-        config.collector_url
+        config.collector_url,
+        config.edge_node_id,
+        config.site,
+        config.environment,
+        config.coverage_role,
+        config.decoy_version
     );
     fflush(stdout);
 
     while (keep_running) {
-        struct sockaddr_in client_address;
-        socklen_t client_length = sizeof(client_address);
-        int client_fd = accept(server_fd, (struct sockaddr *) &client_address, &client_length);
+        fd_set read_fds;
+        struct timeval timeout;
+        time_t now;
+        int ready;
 
-        if (client_fd < 0) {
+        FD_ZERO(&read_fds);
+        FD_SET(server_fd, &read_fds);
+        timeout.tv_sec = 1;
+        timeout.tv_usec = 0;
+
+        ready = select(server_fd + 1, &read_fds, NULL, NULL, &timeout);
+        now = time(NULL);
+
+        if (last_heartbeat_at == 0 || (now - last_heartbeat_at) >= config.heartbeat_interval_seconds) {
+            send_heartbeat_to_collector(&config, (long) (now - started_at), 0);
+            last_heartbeat_at = now;
+        }
+
+        if (ready < 0) {
             if (errno == EINTR) {
                 continue;
             }
-
-            perror("accept");
+            perror("select");
             break;
         }
 
-        handle_client(client_fd, &client_address, &config);
-        close(client_fd);
+        if (ready == 0) {
+            continue;
+        }
+
+        if (FD_ISSET(server_fd, &read_fds)) {
+            struct sockaddr_in client_address;
+            socklen_t client_length = sizeof(client_address);
+            int client_fd = accept(server_fd, (struct sockaddr *) &client_address, &client_length);
+
+            if (client_fd < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+
+                perror("accept");
+                break;
+            }
+
+            handle_client(client_fd, &client_address, &config);
+            close(client_fd);
+        }
     }
 
     close(server_fd);
     return 0;
 }
-

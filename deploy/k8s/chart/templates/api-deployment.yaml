@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "honeynet.fullname" . }}-api
+  labels:
+    {{- include "honeynet.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: api
+      app.kubernetes.io/name: {{ include "honeynet.name" . }}
+  template:
+    metadata:
+      labels:
+        {{- include "honeynet.labels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      containers:
+        - name: api
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: {{ include "honeynet.fullname" . }}-config
+            - secretRef:
+                name: {{ include "honeynet.fullname" . }}-secret
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+

@@ -17,12 +17,12 @@ typedef struct {
 static const SuspiciousRule SUSPICIOUS_RULES[] = {
     {"union select", "sqli_probe"},
     {"<script>", "xss_probe"},
-    {"../", "traversal_probe"},
-    {"wget", "command_probe"},
-    {"curl", "command_probe"},
-    {"cmd=", "command_probe"},
-    {".env", "secret_probe"},
-    {"phpmyadmin", "phpmyadmin_probe"},
+    {"../", "path_traversal_probe"},
+    {"wget", "internet_recon"},
+    {"curl", "internet_recon"},
+    {"cmd=", "internet_recon"},
+    {".env", "sensitive_path_discovery"},
+    {"phpmyadmin", "admin_panel_enumeration"},
 };
 
 
@@ -242,21 +242,22 @@ static void analyze_request(HttpRequest *request) {
     size_t i;
 
     if (strcmp(request->method, "POST") == 0 && strcmp(request->path, "/login") == 0) {
-        add_tag(request, "login_attempt");
+        add_tag(request, "credential_bruteforce");
         if (request->username[0] != '\0' || request->password[0] != '\0') {
-            add_tag(request, "credential_guess");
+            add_tag(request, "credential_attempt");
         }
     }
 
     if (strcmp(request->path, "/admin") == 0 ||
         strcmp(request->path, "/config") == 0 ||
         strcmp(request->path, "/status") == 0) {
-        add_tag(request, "panel_probe");
+        add_tag(request, "admin_panel_enumeration");
+        add_tag(request, "sensitive_path_discovery");
     }
 
     if (!is_known_path(request->path)) {
         request->suspicious = 1;
-        add_tag(request, "unknown_path");
+        add_tag(request, "internet_recon");
     }
 
     for (i = 0; i < sizeof(SUSPICIOUS_RULES) / sizeof(SUSPICIOUS_RULES[0]); i++) {
@@ -294,6 +295,8 @@ int parse_http_request(const char *raw_request, HttpRequest *request) {
 
     trim_query_string(request->path);
     extract_header_value(raw_request, "User-Agent", request->user_agent, sizeof(request->user_agent));
+    extract_header_value(raw_request, "Host", request->host, sizeof(request->host));
+    extract_header_value(raw_request, "Accept", request->accept, sizeof(request->accept));
 
     body_start = strstr(raw_request, "\r\n\r\n");
     if (body_start != NULL) {
@@ -310,4 +313,3 @@ int parse_http_request(const char *raw_request, HttpRequest *request) {
     analyze_request(request);
     return 0;
 }
-

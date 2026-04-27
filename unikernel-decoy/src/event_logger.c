@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <netdb.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +19,9 @@ typedef struct {
     int port;
     char path[128];
 } CollectorUrl;
+
+
+static unsigned long event_counter = 0;
 
 
 static void safe_copy(char *destination, size_t capacity, const char *source) {
@@ -59,6 +63,23 @@ static void current_timestamp(char *buffer, size_t capacity) {
 }
 
 
+static void build_event_id(char *buffer, size_t capacity, const char *prefix) {
+    struct timeval now;
+
+    gettimeofday(&now, NULL);
+    event_counter += 1;
+    snprintf(
+        buffer,
+        capacity,
+        "%s-%ld-%ld-%lu",
+        prefix,
+        (long) now.tv_sec,
+        (long) now.tv_usec,
+        event_counter
+    );
+}
+
+
 static void escape_json(const char *input, char *output, size_t capacity) {
     size_t index = 0;
 
@@ -96,6 +117,26 @@ static void escape_json(const char *input, char *output, size_t capacity) {
 }
 
 
+static void build_headers_subset_json(const HttpRequest *request, char *buffer, size_t capacity) {
+    char escaped_host[MAX_HOSTNAME_LENGTH * 2];
+    char escaped_accept[256];
+
+    escape_json(request->host, escaped_host, sizeof(escaped_host));
+    escape_json(request->accept, escaped_accept, sizeof(escaped_accept));
+
+    snprintf(
+        buffer,
+        capacity,
+        "{"
+        "\"host\":\"%s\","
+        "\"accept\":\"%s\""
+        "}",
+        escaped_host,
+        escaped_accept
+    );
+}
+
+
 static void build_tags_json(const HttpRequest *request, char *buffer, size_t capacity) {
     int i;
     size_t length = 0;
@@ -117,6 +158,47 @@ static void build_tags_json(const HttpRequest *request, char *buffer, size_t cap
     }
 
     append_text(buffer, capacity, &length, "]");
+}
+
+
+static const char *event_class_from_request(const HttpRequest *request) {
+    int index;
+
+    for (index = 0; index < request->tag_count; index++) {
+        if (strcmp(request->tags[index], "credential_bruteforce") == 0) {
+            return "credential";
+        }
+        if (strcmp(request->tags[index], "path_traversal_probe") == 0 ||
+            strcmp(request->tags[index], "xss_probe") == 0 ||
+            strcmp(request->tags[index], "sqli_probe") == 0) {
+            return "probe";
+        }
+        if (strcmp(request->tags[index], "admin_panel_enumeration") == 0 ||
+            strcmp(request->tags[index], "sensitive_path_discovery") == 0) {
+            return "recon";
+        }
+    }
+
+    return request->suspicious ? "scan" : "probe";
+}
+
+
+static void build_request_fingerprint(const HttpRequest *request, char *buffer, size_t capacity) {
+    uint32_t hash = 2166136261u;
+    const char *parts[] = {request->method, request->path, request->user_agent};
+    int part_index;
+
+    for (part_index = 0; part_index < 3; part_index++) {
+        const unsigned char *cursor = (const unsigned char *) parts[part_index];
+        while (cursor != NULL && *cursor != '\0') {
+            hash ^= (uint32_t) *cursor++;
+            hash *= 16777619u;
+        }
+        hash ^= (uint32_t) '|';
+        hash *= 16777619u;
+    }
+
+    snprintf(buffer, capacity, "fp-%08x", hash);
 }
 
 
@@ -222,13 +304,90 @@ static int send_all(int socket_fd, const char *buffer, size_t length) {
 }
 
 
+static int dispatch_payload(const DecoyConfig *config, const char *path_override, const char *payload, int payload_length) {
+    CollectorUrl collector_url;
+    char ingest_header[256];
+    char http_request[8192];
+    char response_buffer[256];
+    int socket_fd = -1;
+    int request_length;
+    int attempt;
+
+    if (parse_collector_url(config->collector_url, &collector_url) != 0) {
+        fprintf(stderr, "collector url is invalid: %s\n", config->collector_url);
+        return -1;
+    }
+
+    if (path_override != NULL && path_override[0] != '\0') {
+        safe_copy(collector_url.path, sizeof(collector_url.path), path_override);
+    }
+
+    ingest_header[0] = '\0';
+    if (config->collector_token[0] != '\0') {
+        snprintf(ingest_header, sizeof(ingest_header), "X-Ingest-Key: %s\r\n", config->collector_token);
+    }
+
+    request_length = snprintf(
+        http_request,
+        sizeof(http_request),
+        "POST %s HTTP/1.1\r\n"
+        "Host: %s:%d\r\n"
+        "User-Agent: unikernel-decoy/%s\r\n"
+        "Content-Type: application/json\r\n"
+        "Content-Length: %d\r\n"
+        "%s"
+        "Connection: close\r\n"
+        "\r\n"
+        "%s",
+        collector_url.path,
+        collector_url.host,
+        collector_url.port,
+        config->decoy_version,
+        payload_length,
+        ingest_header,
+        payload
+    );
+
+    if (request_length < 0 || (size_t) request_length >= sizeof(http_request)) {
+        fprintf(stderr, "collector request was truncated\n");
+        return -1;
+    }
+
+    for (attempt = 1; attempt <= 3; attempt++) {
+        socket_fd = open_connection(&collector_url);
+        if (socket_fd < 0) {
+            fprintf(stderr, "failed to connect to collector at %s (attempt %d)\n", config->collector_url, attempt);
+        } else if (send_all(socket_fd, http_request, (size_t) request_length) == 0) {
+            recv(socket_fd, response_buffer, sizeof(response_buffer) - 1, 0);
+            close(socket_fd);
+            return 0;
+        } else {
+            fprintf(stderr, "failed to send payload to collector (attempt %d)\n", attempt);
+            close(socket_fd);
+        }
+
+        {
+            struct timespec pause;
+            pause.tv_sec = 0;
+            pause.tv_nsec = (long) attempt * 200000000L;
+            nanosleep(&pause, NULL);
+        }
+    }
+
+    return -1;
+}
+
+
 int send_event_to_collector(
     const DecoyConfig *config,
     const HttpRequest *request,
-    const char *source_ip
+    const char *source_ip,
+    int response_status_code,
+    int latency_ms
 ) {
-    CollectorUrl collector_url;
+    char event_id[96];
     char timestamp[32];
+    char request_fingerprint[64];
     char escaped_decoy_id[MAX_HOSTNAME_LENGTH * 2];
     char escaped_profile[MAX_PROFILE_LENGTH * 2];
     char escaped_source_ip[MAX_HOSTNAME_LENGTH * 2];
@@ -237,20 +396,20 @@ int send_event_to_collector(
     char escaped_user_agent[MAX_USER_AGENT_LENGTH * 2];
     char escaped_username[MAX_FIELD_LENGTH * 2];
     char escaped_password[MAX_FIELD_LENGTH * 2];
+    char escaped_edge_node_id[MAX_HOSTNAME_LENGTH * 2];
+    char escaped_decoy_version[MAX_PROFILE_LENGTH * 2];
+    char escaped_public_endpoint[MAX_ENDPOINT_LENGTH * 2];
+    char escaped_site[MAX_HOSTNAME_LENGTH * 2];
+    char escaped_environment[MAX_ENVIRONMENT_LENGTH * 2];
+    char escaped_coverage_role[MAX_LABEL_LENGTH * 2];
     char tags_json[1024];
-    char payload[4096];
-    char http_request[6144];
-    char response_buffer[256];
-    int socket_fd;
+    char headers_subset_json[512];
+    char payload[6144];
     int payload_length;
-    int request_length;
 
-    if (parse_collector_url(config->collector_url, &collector_url) != 0) {
-        fprintf(stderr, "collector url is invalid: %s\n", config->collector_url);
-        return -1;
-    }
-
+    build_event_id(event_id, sizeof(event_id), "evt");
     current_timestamp(timestamp, sizeof(timestamp));
+    build_request_fingerprint(request, request_fingerprint, sizeof(request_fingerprint));
     escape_json(config->decoy_id, escaped_decoy_id, sizeof(escaped_decoy_id));
     escape_json(config->profile, escaped_profile, sizeof(escaped_profile));
     escape_json(source_ip != NULL ? source_ip : "unknown", escaped_source_ip, sizeof(escaped_source_ip));
@@ -259,12 +418,20 @@ int send_event_to_collector(
     escape_json(request->user_agent, escaped_user_agent, sizeof(escaped_user_agent));
     escape_json(request->username, escaped_username, sizeof(escaped_username));
     escape_json(request->password, escaped_password, sizeof(escaped_password));
+    escape_json(config->edge_node_id, escaped_edge_node_id, sizeof(escaped_edge_node_id));
+    escape_json(config->decoy_version, escaped_decoy_version, sizeof(escaped_decoy_version));
+    escape_json(config->public_endpoint, escaped_public_endpoint, sizeof(escaped_public_endpoint));
+    escape_json(config->site, escaped_site, sizeof(escaped_site));
+    escape_json(config->environment, escaped_environment, sizeof(escaped_environment));
+    escape_json(config->coverage_role, escaped_coverage_role, sizeof(escaped_coverage_role));
     build_tags_json(request, tags_json, sizeof(tags_json));
+    build_headers_subset_json(request, headers_subset_json, sizeof(headers_subset_json));
 
     payload_length = snprintf(
         payload,
         sizeof(payload),
         "{"
+        "\"event_id\":\"%s\","
         "\"ts\":\"%s\","
         "\"decoy_id\":\"%s\","
         "\"profile\":\"%s\","
@@ -275,8 +442,22 @@ int send_event_to_collector(
         "\"username\":\"%s\","
         "\"password\":\"%s\","
         "\"suspicious\":%s,"
-        "\"tags\":%s"
+        "\"tags\":%s,"
+        "\"normalized_tags\":%s,"
+        "\"collector_version\":\"%s\","
+        "\"edge_node_id\":\"%s\","
+        "\"decoy_version\":\"%s\","
+        "\"status_code\":%d,"
+        "\"latency_ms\":%d,"
+        "\"headers_subset\":%s,"
+        "\"public_endpoint\":\"%s\","
+        "\"request_fingerprint\":\"%s\","
+        "\"event_class\":\"%s\","
+        "\"site\":\"%s\","
+        "\"environment\":\"%s\","
+        "\"coverage_role\":\"%s\""
         "}",
+        event_id,
         timestamp,
         escaped_decoy_id,
         escaped_profile,
@@ -287,7 +468,20 @@ int send_event_to_collector(
         escaped_username,
         escaped_password,
         request->suspicious ? "true" : "false",
-        tags_json
+        tags_json,
+        tags_json,
+        "decoy-runtime/0.2.0",
+        escaped_edge_node_id,
+        escaped_decoy_version,
+        response_status_code,
+        latency_ms,
+        headers_subset_json,
+        escaped_public_endpoint,
+        request_fingerprint,
+        event_class_from_request(request),
+        escaped_site,
+        escaped_environment,
+        escaped_coverage_role
     );
 
     if (payload_length < 0 || (size_t) payload_length >= sizeof(payload)) {
@@ -295,44 +489,74 @@ int send_event_to_collector(
         return -1;
     }
 
-    request_length = snprintf(
-        http_request,
-        sizeof(http_request),
-        "POST %s HTTP/1.1\r\n"
-        "Host: %s:%d\r\n"
-        "User-Agent: unikernel-decoy/1.0\r\n"
-        "Content-Type: application/json\r\n"
-        "Content-Length: %d\r\n"
-        "Connection: close\r\n"
-        "\r\n"
-        "%s",
-        collector_url.path,
-        collector_url.host,
-        collector_url.port,
-        payload_length,
-        payload
-    );
-
-    if (request_length < 0 || (size_t) request_length >= sizeof(http_request)) {
-        fprintf(stderr, "collector request was truncated\n");
-        return -1;
-    }
-
-    socket_fd = open_connection(&collector_url);
-    if (socket_fd < 0) {
-        fprintf(stderr, "failed to connect to collector at %s\n", config->collector_url);
-        return -1;
-    }
-
-    if (send_all(socket_fd, http_request, (size_t) request_length) != 0) {
-        fprintf(stderr, "failed to send event to collector\n");
-        close(socket_fd);
-        return -1;
-    }
-
-    recv(socket_fd, response_buffer, sizeof(response_buffer) - 1, 0);
-    close(socket_fd);
-
-    return 0;
+    return dispatch_payload(config, NULL, payload, payload_length);
 }
 
+
+int send_heartbeat_to_collector(
+    const DecoyConfig *config,
+    long uptime_seconds,
+    int relay_queue_backlog
+) {
+    char timestamp[32];
+    char escaped_decoy_id[MAX_HOSTNAME_LENGTH * 2];
+    char escaped_edge_node_id[MAX_HOSTNAME_LENGTH * 2];
+    char escaped_decoy_version[MAX_PROFILE_LENGTH * 2];
+    char escaped_public_endpoint[MAX_ENDPOINT_LENGTH * 2];
+    char escaped_profile[MAX_PROFILE_LENGTH * 2];
+    char escaped_site[MAX_HOSTNAME_LENGTH * 2];
+    char escaped_environment[MAX_ENVIRONMENT_LENGTH * 2];
+    char escaped_coverage_role[MAX_LABEL_LENGTH * 2];
+    char payload[2048];
+    int payload_length;
+
+    current_timestamp(timestamp, sizeof(timestamp));
+    escape_json(config->decoy_id, escaped_decoy_id, sizeof(escaped_decoy_id));
+    escape_json(config->edge_node_id, escaped_edge_node_id, sizeof(escaped_edge_node_id));
+    escape_json(config->decoy_version, escaped_decoy_version, sizeof(escaped_decoy_version));
+    escape_json(config->public_endpoint, escaped_public_endpoint, sizeof(escaped_public_endpoint));
+    escape_json(config->profile, escaped_profile, sizeof(escaped_profile));
+    escape_json(config->site, escaped_site, sizeof(escaped_site));
+    escape_json(config->environment, escaped_environment, sizeof(escaped_environment));
+    escape_json(config->coverage_role, escaped_coverage_role, sizeof(escaped_coverage_role));
+
+    payload_length = snprintf(
+        payload,
+        sizeof(payload),
+        "{"
+        "\"ts\":\"%s\","
+        "\"decoy_id\":\"%s\","
+        "\"edge_node_id\":\"%s\","
+        "\"decoy_version\":\"%s\","
+        "\"public_endpoint\":\"%s\","
+        "\"profile\":\"%s\","
+        "\"uptime_seconds\":%ld,"
+        "\"listen_port\":%d,"
+        "\"site\":\"%s\","
+        "\"environment\":\"%s\","
+        "\"coverage_role\":\"%s\","
+        "\"runtime_state\":\"running\","
+        "\"relay_queue_backlog\":%d,"
+        "\"relay_health\":\"healthy\""
+        "}",
+        timestamp,
+        escaped_decoy_id,
+        escaped_edge_node_id,
+        escaped_decoy_version,
+        escaped_public_endpoint,
+        escaped_profile,
+        uptime_seconds,
+        config->listen_port,
+        escaped_site,
+        escaped_environment,
+        escaped_coverage_role,
+        relay_queue_backlog
+    );
+
+    if (payload_length < 0 || (size_t) payload_length >= sizeof(payload)) {
+        fprintf(stderr, "heartbeat payload was truncated\n");
+        return -1;
+    }
+
+    return dispatch_payload(config, "/heartbeat", payload, payload_length);
+}

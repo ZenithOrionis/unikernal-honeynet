@@ -1,0 +1,121 @@
+---
+- name: Bootstrap honeynet edge node
+  hosts: edge
+  become: true
+  vars_files:
+    - group_vars_all.yml
+  tasks:
+    - name: Install required packages
+      ansible.builtin.apt:
+        update_cache: true
+        name:
+          - python3
+          - python3-venv
+          - python3-pip
+          - docker.io
+          - qemu-kvm
+          - qemu-system-x86
+          - curl
+          - git
+        state: present
+
+    - name: Install KraftKit
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if command -v kraft >/dev/null 2>&1; then
+          exit 0
+        fi
+        curl --proto '=https' --tlsv1.2 -sSf https://get.kraftkit.sh | sh
+        install -m 0755 /root/.local/bin/kraft /usr/local/bin/kraft
+      args:
+        creates: /usr/local/bin/kraft
+        executable: /bin/bash
+
+    - name: Create honeynet directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - /opt/honeynet
+        - /opt/honeynet/bin
+        - /opt/honeynet/edge-relay
+        - /opt/honeynet/releases
+        - /opt/honeynet/releases/unikernel-decoy
+        - /var/lib/honeynet-edge-relay
+
+    - name: Copy unikernel decoy source
+      ansible.builtin.copy:
+        src: ../../../unikernel-decoy/
+        dest: /opt/honeynet/releases/unikernel-decoy/
+        mode: preserve
+
+    - name: Copy edge relay requirements
+      ansible.builtin.copy:
+        src: ../../../edge_relay/requirements.txt
+        dest: /opt/honeynet/edge-relay/requirements.txt
+        mode: "0644"
+
+    - name: Copy edge relay app
+      ansible.builtin.copy:
+        src: ../../../edge_relay/app.py
+        dest: /opt/honeynet/edge-relay/app.py
+        mode: "0644"
+
+    - name: Create edge relay virtualenv
+      ansible.builtin.command: python3 -m venv /opt/honeynet/edge-relay/.venv
+      args:
+        creates: /opt/honeynet/edge-relay/.venv/bin/python
+
+    - name: Install edge relay dependencies
+      ansible.builtin.pip:
+        requirements: /opt/honeynet/edge-relay/requirements.txt
+        virtualenv: /opt/honeynet/edge-relay/.venv
+
+    - name: Install edge relay environment file
+      ansible.builtin.template:
+        src: templates/edge-relay.env.j2
+        dest: /etc/honeynet-edge-relay.env
+        mode: "0600"
+
+    - name: Install edge relay systemd unit
+      ansible.builtin.template:
+        src: templates/edge-relay.service.j2
+        dest: /etc/systemd/system/honeynet-edge-relay.service
+        mode: "0644"
+
+    - name: Install decoy systemd unit template
+      ansible.builtin.template:
+        src: templates/decoy-instance.service.j2
+        dest: /etc/systemd/system/honeynet-decoy@.service
+        mode: "0644"
+
+    - name: Install decoy runner
+      ansible.builtin.template:
+        src: templates/decoy-runner.sh.j2
+        dest: /opt/honeynet/bin/decoy-runner.sh
+        mode: "0755"
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Enable and start edge relay
+      ansible.builtin.systemd:
+        name: honeynet-edge-relay.service
+        enabled: true
+        state: started
+
+    - name: Render decoy instance env files
+      ansible.builtin.template:
+        src: templates/decoy-instance.env.j2
+        dest: "/etc/honeynet-decoy-{{ item.name }}.env"
+        mode: "0644"
+      loop: "{{ profiles }}"
+
+    - name: Enable and start decoy services
+      ansible.builtin.systemd:
+        name: "honeynet-decoy@{{ item.name }}.service"
+        enabled: true
+        state: restarted
+      loop: "{{ profiles }}"

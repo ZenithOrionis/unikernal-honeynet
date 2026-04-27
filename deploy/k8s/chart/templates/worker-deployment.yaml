@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "honeynet.fullname" . }}-worker
+  labels:
+    {{- include "honeynet.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: worker
+      app.kubernetes.io/name: {{ include "honeynet.name" . }}
+  template:
+    metadata:
+      labels:
+        {{- include "honeynet.labels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      containers:
+        - name: worker
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          command: ["python", "-m", "ingest_api.worker"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "honeynet.fullname" . }}-config
+            - secretRef:
+                name: {{ include "honeynet.fullname" . }}-secret
+

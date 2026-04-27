@@ -209,7 +209,8 @@ size_t build_http_response(
     const DecoyConfig *config,
     const HttpRequest *request,
     char *response,
-    size_t response_capacity
+    size_t response_capacity,
+    int *status_code_out
 ) {
     const DecoyProfile *profile = resolve_profile(config);
     char body[12288];
@@ -293,6 +294,9 @@ size_t build_http_response(
     }
 
     body_length = (int) strlen(body);
+    if (status_code_out != NULL) {
+        *status_code_out = status_code;
+    }
     {
         int written = snprintf(
         response,

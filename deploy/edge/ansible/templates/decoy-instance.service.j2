@@ -1,0 +1,16 @@
+[Unit]
+Description=Honeynet unikernel decoy %i
+After=network.target honeynet-edge-relay.service
+
+[Service]
+WorkingDirectory=/opt/honeynet
+Environment=HOME=/root
+EnvironmentFile=/etc/honeynet-decoy-%i.env
+ExecStartPre=/bin/sleep ${STARTUP_DELAY_SECONDS}
+ExecStart=/opt/honeynet/bin/decoy-runner.sh start %i
+Restart=always
+RestartSec=10
+TimeoutStopSec=35
+
+[Install]
+WantedBy=multi-user.target

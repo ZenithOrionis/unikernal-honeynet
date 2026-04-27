@@ -1,0 +1,7 @@
+apiVersion: v2
+name: honeynet-control-plane
+description: Kubernetes deployment for the production honeynet control plane
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+

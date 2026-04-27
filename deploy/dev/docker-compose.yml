@@ -1,0 +1,80 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: honeynet
+      POSTGRES_USER: honeynet
+      POSTGRES_PASSWORD: honeynet
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  ingest-api:
+    build:
+      context: ../..
+      dockerfile: ingest_api/Dockerfile
+    command: ["sh", "-lc", "alembic -c ingest_api/alembic.ini upgrade head && uvicorn ingest_api.main:app --host 0.0.0.0 --port 8000"]
+    environment:
+      HONEYPOT_DATABASE_URL: postgresql+psycopg://honeynet:honeynet@postgres:5432/honeynet
+      HONEYPOT_ANALYST_BEARER_TOKEN: dev-analyst-token
+      HONEYPOT_INGEST_API_KEY: dev-ingest-key
+      HONEYPOT_ALLOW_LEGACY_UNAUTHENTICATED_INGEST: "true"
+      HONEYPOT_INLINE_ALERT_PROCESSING: "true"
+      HONEYPOT_WEB_ORIGIN: http://localhost:5173
+      HONEYPOT_ARTIFACT_ENDPOINT_URL: http://minio:9000
+      HONEYPOT_ARTIFACT_ACCESS_KEY: minioadmin
+      HONEYPOT_ARTIFACT_SECRET_KEY: minioadmin
+      HONEYPOT_ARTIFACT_BUCKET: honeynet-artifacts
+      HONEYPOT_EXPECTED_FLEET_JSON: >-
+        [{"decoy_id":"gw-core-01","profile":"router","site":"london-branch","environment":"dmz","coverage_role":"internet_edge","public_endpoint":"http://127.0.0.1:8081","host_port":8081,"edge_node_id":"edge-site-01","decoy_version":"0.2.0"},{"decoy_id":"cam-admin-02","profile":"nvr","site":"london-branch","environment":"dmz","coverage_role":"branch","public_endpoint":"http://127.0.0.1:8082","host_port":8082,"edge_node_id":"edge-site-01","decoy_version":"0.2.0"},{"decoy_id":"ops-panel-03","profile":"admin","site":"london-core","environment":"internal","coverage_role":"internal","public_endpoint":"http://127.0.0.1:8083","host_port":8083,"edge_node_id":"edge-site-01","decoy_version":"0.2.0"}]
+    depends_on:
+      - postgres
+      - minio
+    ports:
+      - "5000:8000"
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: ingest_api/Dockerfile
+    command: ["python", "-m", "ingest_api.worker"]
+    environment:
+      HONEYPOT_DATABASE_URL: postgresql+psycopg://honeynet:honeynet@postgres:5432/honeynet
+      HONEYPOT_ARTIFACT_ENDPOINT_URL: http://minio:9000
+      HONEYPOT_ARTIFACT_ACCESS_KEY: minioadmin
+      HONEYPOT_ARTIFACT_SECRET_KEY: minioadmin
+      HONEYPOT_ARTIFACT_BUCKET: honeynet-artifacts
+      HONEYPOT_EXPECTED_FLEET_JSON: >-
+        [{"decoy_id":"gw-core-01","profile":"router","site":"london-branch","environment":"dmz","coverage_role":"internet_edge","public_endpoint":"http://127.0.0.1:8081","host_port":8081,"edge_node_id":"edge-site-01","decoy_version":"0.2.0"},{"decoy_id":"cam-admin-02","profile":"nvr","site":"london-branch","environment":"dmz","coverage_role":"branch","public_endpoint":"http://127.0.0.1:8082","host_port":8082,"edge_node_id":"edge-site-01","decoy_version":"0.2.0"},{"decoy_id":"ops-panel-03","profile":"admin","site":"london-core","environment":"internal","coverage_role":"internal","public_endpoint":"http://127.0.0.1:8083","host_port":8083,"edge_node_id":"edge-site-01","decoy_version":"0.2.0"}]
+    depends_on:
+      - postgres
+      - minio
+
+  analyst-web:
+    build:
+      context: ../..
+      dockerfile: analyst-web/Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:5000
+        VITE_HIDE_DEV_TOKEN_ENTRY: "false"
+    depends_on:
+      - ingest-api
+    ports:
+      - "5173:80"
+
+volumes:
+  pgdata:
+  minio-data:

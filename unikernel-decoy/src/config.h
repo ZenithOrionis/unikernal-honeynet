@@ -5,11 +5,19 @@
 
 #define DEFAULT_LISTEN_PORT 80
 #define DEFAULT_COLLECTOR_URL "http://10.0.2.2:5000/event"
+#define DEFAULT_COLLECTOR_TOKEN ""
 #define DEFAULT_PROFILE "router"
 #define DEFAULT_DECOY_ID "gw-core-01"
 #define DEFAULT_TITLE "EdgeRouter X"
 #define DEFAULT_HOSTNAME "gw-core-01"
 #define DEFAULT_LABEL "WAN routing node"
+#define DEFAULT_EDGE_NODE_ID "edge-dev-01"
+#define DEFAULT_DECOY_VERSION "0.1.0"
+#define DEFAULT_PUBLIC_ENDPOINT ""
+#define DEFAULT_SITE "unknown"
+#define DEFAULT_ENVIRONMENT "unknown"
+#define DEFAULT_COVERAGE_ROLE "internet_edge"
+#define DEFAULT_HEARTBEAT_INTERVAL_SECONDS 30
 #define DEFAULT_ASSET_DIR "/app/assets"
 
 #define MAX_METHOD_LENGTH 8
@@ -22,7 +30,10 @@
 #define MAX_HOSTNAME_LENGTH 64
 #define MAX_LABEL_LENGTH 128
 #define MAX_URL_LENGTH 256
+#define MAX_TOKEN_LENGTH 128
 #define MAX_ASSET_DIR_LENGTH 256
+#define MAX_ENDPOINT_LENGTH 256
+#define MAX_ENVIRONMENT_LENGTH 64
 #define MAX_TAG_COUNT 12
 #define MAX_TAG_LENGTH 64
 
@@ -30,6 +41,8 @@ typedef struct {
     char method[MAX_METHOD_LENGTH];
     char path[MAX_PATH_LENGTH];
     char user_agent[MAX_USER_AGENT_LENGTH];
+    char host[MAX_HOSTNAME_LENGTH];
+    char accept[128];
     char body[MAX_BODY_LENGTH];
     char username[MAX_FIELD_LENGTH];
     char password[MAX_FIELD_LENGTH];
@@ -46,7 +59,15 @@ typedef struct {
     char hostname[MAX_HOSTNAME_LENGTH];
     char label[MAX_LABEL_LENGTH];
     char collector_url[MAX_URL_LENGTH];
+    char collector_token[MAX_TOKEN_LENGTH];
     char asset_dir[MAX_ASSET_DIR_LENGTH];
+    char edge_node_id[MAX_HOSTNAME_LENGTH];
+    char decoy_version[MAX_PROFILE_LENGTH];
+    char public_endpoint[MAX_ENDPOINT_LENGTH];
+    char site[MAX_HOSTNAME_LENGTH];
+    char environment[MAX_ENVIRONMENT_LENGTH];
+    char coverage_role[MAX_LABEL_LENGTH];
+    int heartbeat_interval_seconds;
     int listen_port;
 } DecoyConfig;
 
@@ -70,13 +91,20 @@ size_t build_http_response(
     const DecoyConfig *config,
     const HttpRequest *request,
     char *response,
-    size_t response_capacity
+    size_t response_capacity,
+    int *status_code_out
 );
 int send_event_to_collector(
     const DecoyConfig *config,
     const HttpRequest *request,
-    const char *source_ip
+    const char *source_ip,
+    int response_status_code,
+    int latency_ms
+);
+int send_heartbeat_to_collector(
+    const DecoyConfig *config,
+    long uptime_seconds,
+    int relay_queue_backlog
 );
 
 #endif
-

@@ -1,0 +1,60 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "honeynet.fullname" . }}-postgres
+  labels:
+    {{- include "honeynet.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/component: postgres
+    app.kubernetes.io/name: {{ include "honeynet.name" . }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "honeynet.fullname" . }}-postgres
+  labels:
+    {{- include "honeynet.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "honeynet.fullname" . }}-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: postgres
+      app.kubernetes.io/name: {{ include "honeynet.name" . }}
+  template:
+    metadata:
+      labels:
+        {{- include "honeynet.labels" . | nindent 8 }}
+        app.kubernetes.io/component: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.database | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.username | quote }}
+            - name: POSTGRES_PASSWORD
+              value: {{ .Values.postgres.password | quote }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage }}
+{{- end }}
+

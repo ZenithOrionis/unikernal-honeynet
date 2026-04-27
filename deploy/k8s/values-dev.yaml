@@ -1,0 +1,9 @@
+env:
+  environment: dev
+  webOrigin: http://localhost:5173
+api:
+  ingressApiKey: dev-ingest-key
+  analystBearerToken: dev-analyst-token
+ingress:
+  enabled: false
+

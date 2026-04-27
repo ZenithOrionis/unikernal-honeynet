@@ -1,0 +1,61 @@
+namespaceOverride: ""
+
+api:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/zenithorionis/unikernal-honeynet-api
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    port: 8000
+  ingressApiKey: dev-ingest-key
+  analystBearerToken: dev-analyst-token
+  oidcIssuerUrl: ""
+  oidcAudience: ""
+
+worker:
+  replicaCount: 1
+
+migrations:
+  enabled: true
+
+web:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/zenithorionis/unikernal-honeynet-web
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    port: 80
+
+postgres:
+  enabled: true
+  image: postgres:16-alpine
+  database: honeynet
+  username: honeynet
+  password: honeynet
+  storage: 10Gi
+
+minio:
+  enabled: true
+  image: minio/minio:latest
+  accessKey: minioadmin
+  secretKey: minioadmin
+  bucket: honeynet-artifacts
+  storage: 10Gi
+
+ingress:
+  enabled: true
+  className: nginx
+  host: honeynet.internal.example.com
+  tlsSecretName: honeynet-tls
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 4m
+    nginx.ingress.kubernetes.io/auth-url: ""
+    nginx.ingress.kubernetes.io/auth-signin: ""
+
+env:
+  environment: prod
+  webOrigin: https://honeynet.internal.example.com
+  retentionDays: 30
+  expectedFleetJson: "[]"

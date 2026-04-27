@@ -1,116 +1,133 @@
-# Unikernel Honeynet
+# Enterprise Honeynet V2
 
-This repository implements a narrow, demo-friendly honeynet:
+Enterprise Honeynet V2 is a self-hosted hybrid deception platform for mid-market SOC teams. It places low-interaction Unikraft decoys on customer-controlled edge hosts, then turns attacker interaction into detections, investigations, blocklist artifacts, and management-ready exports inside a customer-owned control plane.
 
-- 1 HTTP decoy app packaged as a Unikraft-compatible unikernel workload
-- 3 local unikernel instances with different identities and bait pages
-- 1 central Flask collector with SQLite storage
-- 1 lightweight dashboard and offline HTML report generator
-- 1 attack simulation script for reproducible demo traffic
-- 1 Docker baseline that behaves similarly for comparison
+Core promise:
+
+> Your decoys catch attackers before your perimeter does. The platform tells analysts what to block, what to escalate, and what to hand to incident response.
+
+## What is in this repository
+
+- `ingest_api/`: FastAPI control plane, PostgreSQL models, migrations, worker-driven detection materialization, OIDC/dev auth, and MinIO-backed exports
+- `analyst-web/`: React analyst console with posture, detections, investigations, fleet, exports, and raw event drill-down
+- `analyst-web/src-tauri/`: Tauri desktop shell for packaging the analyst console as a native Windows, macOS, or Linux app
+- `edge_relay/`: edge-side forwarder with separate event and heartbeat queues plus spool replay
+- `unikernel-decoy/`: low-interaction HTTP decoy runtime for Unikraft/KVM with fingerprints and periodic heartbeats
+- `deploy/dev/`: Docker Compose stack for local enterprise-style validation
+- `deploy/k8s/`: Helm chart for self-hosted Kubernetes deployments
+- `deploy/edge/`: Ansible and systemd assets for decoy and relay deployment on customer-controlled edge hosts
+- `docs/`: buyer-facing and operator-facing product, architecture, deployment, and governance docs
 
 ## Architecture
 
 ```text
-[attacker traffic / test scripts]
-              |
-        host port mappings
-     8081    8082    8083
-       |       |       |
-     UK-1    UK-2    UK-3
-       \       |       /
-        \      |      /
-         [collector API]
-               |
-        [SQLite + raw JSON]
-               |
-      [dashboard + reports]
+internet traffic
+      |
+ public edge IPs / NAT / load balancer
+      |
+  [Unikraft decoy fleet]
+      |
+ [edge relay + local queues]
+      |
+ private authenticated ingest
+      |
+ [FastAPI control plane] ---- [worker]
+             |                   |
+             +---- PostgreSQL ---+
+             |
+           [MinIO]
+             |
+      [React analyst console]
 ```
 
-## Project layout
+Trust boundary:
+- No SaaS control plane
+- PostgreSQL, MinIO, analyst UI, and API stay in the customer environment
+- Edge decoys remain customer-controlled sensors
 
-```text
-unikernel-honeynet/
-├── README.md
-├── docs/
-├── unikernel-decoy/
-├── collector/
-├── dashboard/
-├── scripts/
-└── container-baseline/
+## Local quickstart
+
+Start the local control plane:
+
+```bash
+docker compose -f deploy/dev/docker-compose.yml up --build
 ```
 
-## Implementation notes
+This brings up:
+- PostgreSQL on `localhost:5432`
+- MinIO on `localhost:9000` and console on `localhost:9001`
+- FastAPI on `http://localhost:5000`
+- Analyst UI on `http://localhost:5173`
+- Worker in the same Compose network
 
-The unikernel workload is implemented as a small C HTTP server and packaged on top of the Unikraft `base:latest` runtime using a `Kraftfile` `v0.6` plus a root filesystem `Dockerfile`. That keeps the application code small and portable while still letting `kraft run` manage multiple local KVM-backed instances with port publishing.
+Default dev credentials:
+- Analyst token: `dev-analyst-token`
+- Ingest key: `dev-ingest-key`
+- MinIO: `minioadmin` / `minioadmin`
 
-The launch script defaults each unikernel instance to sending events to `http://10.0.2.2:5000/event`, which is the usual host-side address from QEMU user-mode networking. If your setup differs, override `COLLECTOR_URL` before launching.
+To make the three local decoys visible to other devices on the same LAN for `nmap` testing, see [docs/local-lan-exposure.md](C:/Users/Saphiya/Downloads/Unikernel/docs/local-lan-exposure.md). This exposes only ports `8081-8083`; keep the API, dashboard, database, and MinIO private.
 
-## Quick start
+## Primary analyst surfaces
 
-These steps are intended for Ubuntu on bare metal or WSL2 with nested virtualization enabled.
+- `Posture`: fleet health, severity load, recommended blocks, coverage gaps, and 24-hour change
+- `Detections`: actionable findings with response recommendations and evidence export
+- `Investigations`: grouped activity by source or campaign fingerprint
+- `Fleet`: live sensor health, exposure, runtime state, and heartbeat freshness
+- `Exports`: management summary, evidence packages, and IOC/blocklist artifacts
+- `Events`: secondary drill-down for raw telemetry
 
-1. Prepare the host:
+## Native desktop app
 
-   ```bash
-   bash scripts/setup_host.sh
-   ```
+The analyst console can also be packaged as a Tauri desktop app. The native app is a SOC console only; it still connects to the self-hosted control plane and does not embed PostgreSQL, MinIO, KraftKit, or decoy VMs.
 
-2. Install Python dependencies:
+```powershell
+cd analyst-web
+npm run tauri:dev
+```
 
-   ```bash
-   python3 -m venv .venv
-   . .venv/bin/activate
-   pip install -r collector/requirements.txt -r container-baseline/requirements.txt
-   ```
+To build installers after installing Rust/Cargo:
 
-3. Start the collector:
+```powershell
+cd analyst-web
+npm run tauri:build
+```
 
-   ```bash
-   python collector/app.py
-   ```
+See [docs/desktop-app.md](C:/Users/Saphiya/Downloads/Unikernel/docs/desktop-app.md).
 
-4. Build the Unikraft workload:
+## Production deployment model
 
-   ```bash
-   bash scripts/build_unikernel.sh
-   ```
+- Decoys run on KVM-capable edge nodes using Unikraft and KraftKit
+- The edge relay batches and replays both events and heartbeats
+- The control plane runs in Kubernetes
+- PostgreSQL is the system of record
+- MinIO is the default self-hosted artifact store and remains S3-compatible
 
-5. Launch the three unikernel instances:
+See:
+- [docs/product-positioning.md](C:/Users/Saphiya/Downloads/Unikernel/docs/product-positioning.md)
+- [docs/reference-architecture.md](C:/Users/Saphiya/Downloads/Unikernel/docs/reference-architecture.md)
+- [docs/deployment-patterns.md](C:/Users/Saphiya/Downloads/Unikernel/docs/deployment-patterns.md)
+- [docs/security-and-governance.md](C:/Users/Saphiya/Downloads/Unikernel/docs/security-and-governance.md)
 
-   ```bash
-   bash scripts/launch_instances.sh
-   ```
+## Validation
 
-6. Generate demo traffic:
+Recommended local validation:
 
-   ```bash
-   bash scripts/attack_sim.sh
-   ```
+```bash
+py -3 -m compileall ingest_api edge_relay collector dashboard
+py -3 -m pytest ingest_api\tests -q -p no:cacheprovider
+cd analyst-web && npm run build && npm test -- --run
+```
 
-7. Generate an offline report:
+## Demo story
 
-   ```bash
-   python dashboard/report.py
-   ```
+The strongest demo path is:
 
-8. Bring up the Docker baseline:
+1. Launch the control plane
+2. Run the edge decoys and relay
+3. Generate scanner and credential activity
+4. Show new detections
+5. Pivot into an investigation
+6. Export a blocklist artifact
+7. Export a management summary
 
-   ```bash
-   docker compose -f container-baseline/docker-compose.yml up --build -d
-   ```
-
-## Demo flow
-
-1. Start the collector and open `http://localhost:5000/`.
-2. Launch the three unikernels on `8081`, `8082`, and `8083`.
-3. Run `scripts/attack_sim.sh` to populate the collector.
-4. Generate `dashboard/output/report.html`.
-5. Start the Docker baseline on `8090` and compare startup, logging ease, and reset workflow.
-
-## Current limitations
-
-- The honeypots are deliberately low-interaction.
-- The current unikernel packaging path depends on Docker/BuildKit to turn the root filesystem `Dockerfile` into an initramfs.
-- The repository can be edited from Windows, but the actual Unikraft runtime flow needs Linux plus KVM support.
-
+That flow demonstrates early warning, triage, containment guidance, and evidence handoff without leaving the platform.

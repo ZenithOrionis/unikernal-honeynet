@@ -1,0 +1,11 @@
+env:
+  environment: prod
+  webOrigin: https://honeynet.internal.example.com
+  retentionDays: 90
+ingress:
+  host: honeynet.internal.example.com
+api:
+  replicaCount: 3
+web:
+  replicaCount: 3
+
